@@ -1,5 +1,6 @@
 [package]
 name = "easier_sendme"
+description = "A simpler version of Sendme for learning"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,5 +10,7 @@ clap = { version = "4.5.48", features = ["derive"] }
 iroh = "0.92.0"
 iroh-blobs = {version = "0.94.0"}
 n0-future = "0.2.0"
+num_cpus = "1.17.0"
+rand = "0.8.5"
 tokio = "1.47.1"
 walkdir = "2.5.0"
