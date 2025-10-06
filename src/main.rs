@@ -13,7 +13,7 @@ use iroh_blobs::{
     store::{fs::FsStore, mem::MemStore},
     ticket::{self, BlobTicket},
 };
-use n0_future::{BufferedStreamExt, StreamExt};
+use n0_future::{BufferedStreamExt, IterExt, StreamExt};
 use std::{
     ffi::OsString,
     fs::{self, create_dir_all},
@@ -124,7 +124,7 @@ async fn receive(path: Option<PathBuf>, ticket: BlobTicket) -> Result<()> {
     let endpoint = Endpoint::builder().secret_key(key).discovery_n0().bind().await?;
 
     let temp_path =
-        std::env::current_dir()?.join(PathBuf::from(format!(".temp_{}", ticket.hash().to_hex())));
+        std::env::current_dir()?.join(PathBuf::from(format!(".temp_receiver_{}", ticket.hash().to_hex())));
     dbg!(temp_path.clone());
 
     if !temp_path.exists() {
@@ -152,7 +152,6 @@ async fn receive(path: Option<PathBuf>, ticket: BlobTicket) -> Result<()> {
 
     for (name, hash) in collection.iter() {
     let current_path = std::env::current_dir()?;
-
             let rel_path = 
          if let Some(name_path) = path.clone() {
             println!("exporting to {:?}", name_path);
