@@ -2,16 +2,11 @@ use anyhow::{Context, Ok, Result};
 use clap::{Parser, Subcommand};
 use iroh::{protocol::Router, Endpoint, SecretKey, Watcher};
 use iroh_blobs::{
-    BlobFormat, BlobsProtocol, Hash,
     api::{
-        blobs::{AddPathOptions, ExportMode, ExportOptions, ImportMode},
+        blobs::{self, AddPathOptions, ExportMode, ExportOptions, ImportMode},
         remote::GetProgressItem,
-        tags::TagInfo,
-    },
-    format::collection::Collection,
-    get::{self, Stats},
-    store::{fs::FsStore, mem::MemStore},
-    ticket::{self, BlobTicket},
+        tags::TagInfo, Store,
+    }, format::collection::Collection, get::{self, Stats}, store::{fs::FsStore, mem::MemStore}, ticket::{self, BlobTicket}, BlobFormat, BlobsProtocol, Hash
 };
 use n0_future::{BufferedStreamExt, IterExt, StreamExt};
 use std::{
@@ -39,36 +34,19 @@ struct Comandos {
 #[derive(Subcommand)]
 enum Operation {
     Send {
-        path: PathBuf,
+        #[clap(long,short)]
+        path: Option<PathBuf>,
+        #[clap(long,short)]
         database: Option<PathBuf>,
     },
     Receive {
         ticket: BlobTicket,
+        #[clap(long,short)]
         path: Option<PathBuf>,
     },
 }
 
-async fn send(path: PathBuf, database: Option<PathBuf>) -> Result<()> {
-    let mut rng = rand::rngs::OsRng;
-    let key =  SecretKey::generate(&mut rng);
-    let endpoint = Endpoint::builder().secret_key(key).discovery_n0().bind().await?;
-
-    let database_path: PathBuf = match database {
-        Some(a) => a.canonicalize()?,
-        None => std::env::current_dir()?.join(PathBuf::from(format!(
-            ".temp_sender_{:?}",
-            path.file_name().unwrap().to_os_string()
-        ))),
-    };
-
-    let store = FsStore::load(database_path.clone()).await?;
-
-    let blobs: BlobsProtocol = BlobsProtocol::new(&store, endpoint.clone(), None);
-
-    let router = Router::builder(endpoint.clone())
-        .accept(iroh_blobs::ALPN, blobs.clone())
-        .spawn();
-
+async fn send_path(path: PathBuf, blobs: BlobsProtocol,store: FsStore, router: Router) -> Result<()> {
     let archivos = WalkDir::new(path.canonicalize()?.clone())
         .into_iter()
         .filter_map(|f| {
@@ -111,9 +89,35 @@ async fn send(path: PathBuf, database: Option<PathBuf>) -> Result<()> {
     println!("{:?}", coleccion);
     println!(" TICKET: {ticket}");
 
+    Ok(())
+}
+
+async fn send(path: Option<PathBuf>, database: Option<PathBuf>) -> Result<()> {
+    let mut rng = rand::rngs::OsRng;
+    let key =  SecretKey::generate(&mut rng);
+    let endpoint = Endpoint::builder().secret_key(key).discovery_n0().bind().await?;
+
+    let database_path: PathBuf = match database {
+        Some(ref a) => a.canonicalize()?,
+        None => std::env::current_dir()?.join(PathBuf::from(format!(
+            ".temp_sender_{:?}",
+            if let Some(p) = path.clone() {p.file_name().unwrap().to_os_string()}else{OsString::from("default")}
+        ))),
+    };
+
+    let store = FsStore::load(database_path.clone()).await?;
+
+    let blobs: BlobsProtocol = BlobsProtocol::new(&store, endpoint.clone(), None);
+
+    let router: Router = Router::builder(endpoint.clone())
+        .accept(iroh_blobs::ALPN, blobs.clone())
+        .spawn();
+
+    if path.is_some() {send_path(path.unwrap(),blobs,store,router.clone()).await?;}
+
     tokio::signal::ctrl_c().await;
 
-    remove_dir_all(database_path).await?;
+    if database.is_none() {remove_dir_all(database_path).await?;}
     router.shutdown().await?;
     Ok(())
 }
@@ -154,6 +158,7 @@ async fn receive(path: Option<PathBuf>, ticket: BlobTicket) -> Result<()> {
     let current_path = std::env::current_dir()?;
             let rel_path = 
          if let Some(name_path) = path.clone() {
+            if !name_path.exists() {create_dir_all(name_path.clone())?}
             println!("exporting to {:?}", name_path);
             name_path.canonicalize()?
         }
@@ -180,7 +185,7 @@ async fn receive(path: Option<PathBuf>, ticket: BlobTicket) -> Result<()> {
 async fn main() -> Result<()> {
     let comandos = Comandos::parse();
     match comandos.operation {
-        Operation::Send { path, database } => send(path, database).await?,
+        Operation::Send { path, database} => send(path, database).await?,
         Operation::Receive { path, ticket } => receive(path, ticket).await?,
     }
     Ok(())
